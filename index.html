@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>NEXUS · Open Source Treasure Cartographer</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="NEXUS Treasure">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M8 48 L24 16 L40 48 L32 48 L24 28 L16 48 Z' fill='none' stroke='%2300ff87' stroke-width='2'/%3E%3Ccircle cx='32' cy='36' r='4' fill='%23ff0080'/%3E%3C/svg%3E">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+:root {
+  --neon-green: #00ff87;
+  --neon-cyan: #60efff;
+  --neon-pink: #ff0080;
+  --neon-yellow: #ffcc00;
+  --bg: #0a0a0f;
+}
+body {
+  background: var(--bg);
+  color: #e0e0e0;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  margin: 0;
+  overflow: hidden;
+  height: 100vh;
+}
+.header-stamp {
+  background: linear-gradient(90deg, rgba(0,255,135,0.1), rgba(96,239,255,0.05));
+  border-bottom: 1px solid rgba(0,255,135,0.3);
+  box-shadow: 0 0 20px rgba(0,255,135,0.2);
+}
+.neon-text {
+  text-shadow: 0 0 10px currentColor, 0 0 20px currentColor;
+}
+.glow-border {
+  box-shadow: 0 0 15px rgba(0,255,135,0.4), inset 0 0 10px rgba(0,255,135,0.1);
+}
+.category-node {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.category-node:hover {
+  filter: brightness(1.3);
+  transform: scale(1.05);
+}
+.gem-item {
+  border-left: 3px solid var(--neon-green);
+  transition: all 0.15s;
+}
+.gem-item:hover {
+  background: rgba(0,255,135,0.08);
+  border-left-color: var(--neon-pink);
+}
+.search-highlight {
+  background: rgba(255,204,0,0.2);
+  animation: pulse 1.5s infinite;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 5px var(--neon-yellow); }
+  50% { box-shadow: 0 0 20px var(--neon-yellow); }
+}
+#canvas-container {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+}
+#map-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+#map-canvas:active {
+  cursor: grabbing;
+}
+.panel {
+  background: rgba(10,10,15,0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(96,239,255,0.3);
+  box-shadow: 0 0 30px rgba(0,0,0,0.5), 0 0 20px rgba(96,239,255,0.15);
+}
+.sigil {
+  width: 32px;
+  height: 32px;
+}
+@media (max-width: 768px) {
+  .side-panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 45vh;
+    z-index: 50;
+    border-radius: 16px 16px 0 0;
+  }
+  .header-stamp {
+    font-size: 0.75rem;
+  }
+}
+</style>
+</head>
+<body class="flex flex-col h-screen">
+<!-- BRAND STAMP -->
+<header class="header-stamp px-4 py-2 flex items-center justify-between z-40">
+  <div class="flex items-center gap-3">
+    <svg class="sigil" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+          <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <path d="M8 48 L24 16 L40 48 L32 48 L24 28 L16 48 Z" fill="none" stroke="#00ff87" stroke-width="2" filter="url(#glow)"/>
+      <circle cx="32" cy="36" r="4" fill="#ff0080" filter="url(#glow)"/>
+      <path d="M28 36 L36 36 M32 32 L32 40" stroke="#60efff" stroke-width="1"/>
+    </svg>
+    <div>
+      <div class="text-lg font-bold tracking-widest" style="color: #00ff87;">NEXUS</div>
+      <div class="text-xs opacity-80" style="color: #60efff;">NExtended Xperimental USers</div>
+    </div>
+  </div>
+  <div class="text-right text-xs">
+    <div style="color: #ffcc00;">DoubleA · AntManThePro</div>
+    <div class="opacity-60">Treasure Cartographer</div>
+  </div>
+</header>
+
+<!-- MAIN LAYOUT -->
+<div class="flex flex-1 overflow-hidden">
+  <!-- CANVAS MAP -->
+  <div id="canvas-container" class="relative">
+    <canvas id="map-canvas"></canvas>
+    <div class="absolute top-4 left-4 right-4 md:right-auto md:w-80 z-30">
+      <input id="search" type="text" placeholder="Hunt for gems... (OWASP, CyberChef, RFC...)" 
+             class="w-full bg-black/70 border border-cyan-400/50 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-green-400 glow-border placeholder-gray-500">
+    </div>
+    <div class="absolute bottom-4 left-4 text-xs opacity-70 flex gap-4">
+      <span id="stats">Gems: 0</span>
+      <span id="zoom-info">Zoom: 1.0x</span>
+    </div>
+  </div>
+
+  <!-- SIDE PANEL -->
+  <aside id="side-panel" class="panel side-panel w-full md:w-96 lg:w-[28rem] overflow-y-auto p-4 hidden md:block">
+    <div class="flex justify-between items-center mb-3">
+      <h2 class="text-lg font-bold" style="color: #00ff87;">VAULT CONTENTS</h2>
+      <button id="export-btn" class="text-xs px-3 py-1 rounded border border-pink-500/50 text-pink-400 hover:bg-pink-500/10">EXPORT</button>
+    </div>
+    <div id="panel-content" class="space-y-2 text-sm">
+      <p class="opacity-60">Click a category node on the map to reveal its hidden gems.</p>
+    </div>
+  </aside>
+</div>
+
+<script>
+// === TREASURE DATA (curated from the map) ===
+const TREASURES = {
+  "Security & Privacy": {
+    color: "#ff0080",
+    x: 0.2, y: 0.25,
+    gems: [
+      { name: "OWASP CheatSheet Series", url: "https://github.com/OWASP/CheatSheetSeries", desc: "Holy grail of security practices" },
+      { name: "PayloadsAllTheThings", url: "https://github.com/swisskyrepo/PayloadsAllTheThings", desc: "Every penetration tester's secret weapon" },
+      { name: "SecLists", url: "https://github.com/danielmiessler/SecLists", desc: "Ultimate collection of security testing lists" },
+      { name: "CyberChef", url: "https://github.com/gchq/CyberChef", desc: "GCHQ's Swiss Army knife for data analysis" },
+      { name: "TheHive Project", url: "https://docs.thehive-project.org/", desc: "Incident response orchestration mastery" },
+      { name: "PrivacyGuides", url: "https://github.com/privacyguides/privacyguides.org", desc: "Definitive privacy protection guide" },
+      { name: "Awesome-Selfhosted", url: "https://github.com/awesome-selfhosted/awesome-selfhosted", desc: "Break free from big tech" },
+      { name: "Tails Documentation", url: "https://tails.boum.org/doc/index.en.html", desc: "Amnesic incognito live system" }
+    ]
+  },
+  "System Administration": {
+    color: "#60efff",
+    x: 0.45, y: 0.2,
+    gems: [
+      { name: "Terraform Best Practices", url: "https://github.com/ozbillwang/terraform-best-practices", desc: "Infrastructure secrets revealed" },
+      { name: "Ansible Best Practices", url: "https://docs.ansible.com/ansible/latest/user_guide/playbooks_best_practices.html", desc: "Automation artistry" },
+      { name: "Docker Security", url: "https://github.com/docker/docker-bench-security", desc: "Container fortification" },
+      { name: "Prometheus Operator", url: "https://github.com/prometheus-operator/prometheus-operator", desc: "Monitoring nirvana" },
+      { name: "Grafana Dashboards", url: "https://grafana.com/grafana/dashboards/", desc: "Visual intelligence goldmine" }
+    ]
+  },
+  "Development Superpowers": {
+    color: "#00ff87",
+    x: 0.7, y: 0.3,
+    gems: [
+      { name: "Clean Code JavaScript", url: "https://github.com/ryanmcdermott/clean-code-javascript", desc: "Write code like poetry" },
+      { name: "System Design Primer", url: "https://github.com/donnemartin/system-design-primer", desc: "Scale to infinity" },
+      { name: "The Twelve-Factor App", url: "https://12factor.net/", desc: "Build bulletproof applications" },
+      { name: "Google Style Guides", url: "https://github.com/google/styleguide", desc: "Code like Google engineers" },
+      { name: "Microsoft REST API Guidelines", url: "https://github.com/Microsoft/api-guidelines", desc: "API design perfection" },
+      { name: "OpenAPI Specification", url: "https://github.com/OAI/OpenAPI-Specification", desc: "API documentation mastery" }
+    ]
+  },
+  "Data Science & ML": {
+    color: "#ffcc00",
+    x: 0.3, y: 0.55,
+    gems: [
+      { name: "Papers With Code", url: "https://paperswithcode.com/", desc: "Cutting-edge research implementations" },
+      { name: "ML Engineering Best Practices", url: "https://github.com/eugeneyan/applied-ml", desc: "Production ML wisdom" },
+      { name: "Awesome MLOps", url: "https://github.com/visenger/awesome-mlops", desc: "ML operations excellence" },
+      { name: "Data Engineering Cookbook", url: "https://github.com/andkret/Cookbook", desc: "The complete guide" },
+      { name: "dbt Docs", url: "https://docs.getdbt.com/", desc: "Transform data like a pro" }
+    ]
+  },
+  "Web Development": {
+    color: "#60efff",
+    x: 0.6, y: 0.6,
+    gems: [
+      { name: "Web.dev Guides", url: "https://web.dev/", desc: "Google's web performance bible" },
+      { name: "MDN Web Security", url: "https://developer.mozilla.org/en-US/docs/Web/Security", desc: "Browser security mastery" },
+      { name: "Lighthouse CI", url: "https://github.com/GoogleChrome/lighthouse-ci", desc: "Performance monitoring automation" },
+      { name: "React Best Practices", url: "https://github.com/vasanthk/react-bits", desc: "React patterns and anti-patterns" },
+      { name: "CSS Guidelines", url: "https://cssguidelin.es/", desc: "CSS architecture secrets" }
+    ]
+  },
+  "Reverse Engineering": {
+    color: "#ff0080",
+    x: 0.8, y: 0.7,
+    gems: [
+      { name: "Ghidra Documentation", url: "https://ghidra-sre.org/", desc: "NSA's reverse engineering tool" },
+      { name: "Radare2 Book", url: "https://book.rada.re/", desc: "Binary analysis mastery" },
+      { name: "Volatility Framework", url: "https://github.com/volatilityfoundation/volatility", desc: "Memory analysis mastery" }
+    ]
+  },
+  "Documentation & Internals": {
+    color: "#00ff87",
+    x: 0.25, y: 0.8,
+    gems: [
+      { name: "Bash Hackers Wiki", url: "https://wiki.bash-hackers.org/", desc: "Shell scripting enlightenment" },
+      { name: "Git Internals", url: "https://git-scm.com/book/en/v2/Git-Internals-Plumbing-and-Porcelain", desc: "Version control deep dive" },
+      { name: "Linux From Scratch", url: "http://www.linuxfromscratch.org/", desc: "Build your own OS" },
+      { name: "RFC Documents", url: "https://www.rfc-editor.org/", desc: "Internet standards and protocols" },
+      { name: "NIST Cybersecurity Framework", url: "https://www.nist.gov/cyberframework", desc: "Security governance" }
+    ]
+  },
+  "Productivity & CLI": {
+    color: "#ffcc00",
+    x: 0.55, y: 0.85,
+    gems: [
+      { name: "The Art of Command Line", url: "https://github.com/jlevy/the-art-of-command-line", desc: "CLI enlightenment" },
+      { name: "Modern Unix Tools", url: "https://github.com/ibraheemdev/modern-unix", desc: "Next-gen command line tools" },
+      { name: "GitHub Actions Cookbook", url: "https://github.com/actions/toolkit", desc: "CI/CD automation mastery" }
+    ]
+  },
+  "Cryptography": {
+    color: "#60efff",
+    x: 0.75, y: 0.45,
+    gems: [
+      { name: "Crypto101", url: "https://www.crypto101.io/", desc: "Cryptography for developers" },
+      { name: "LibSodium Documentation", url: "https://libsodium.gitbook.io/doc/", desc: "Modern crypto library" },
+      { name: "OpenSSL Cookbook", url: "https://www.feistyduck.com/library/openssl-cookbook/", desc: "SSL/TLS mastery" }
+    ]
+  }
+};
+
+// === STATE ===
+let canvas, ctx, W, H;
+let offsetX = 0, offsetY = 0, scale = 1;
+let isDragging = false, lastX, lastY;
+let particles = [];
+let selectedCategory = null;
+let searchTerm = "";
+
+// === CANVAS SETUP ===
+function init() {
+  canvas = document.getElementById('map-canvas');
+  ctx = canvas.getContext('2d');
+  resize();
+  window.addEventListener('resize', resize);
+  
+  // Interaction
+  canvas.addEventListener('mousedown', startDrag);
+  canvas.addEventListener('mousemove', drag);
+  canvas.addEventListener('mouseup', endDrag);
+  canvas.addEventListener('mouseleave', endDrag);
+  canvas.addEventListener('wheel', zoom);
+  canvas.addEventListener('click', onClick);
+  
+  // Touch
+  canvas.addEventListener('touchstart', e => { e.preventDefault(); startDrag(e.touches[0]); }, {passive:false});
+  canvas.addEventListener('touchmove', e => { e.preventDefault(); drag(e.touches[0]); }, {passive:false});
+  canvas.addEventListener('touchend', endDrag);
+  
+  document.getElementById('search').addEventListener('input', e => {
+    searchTerm = e.target.value.toLowerCase();
+    renderPanel();
+  });
+  
+  document.getElementById('export-btn').addEventListener('click', exportData);
+  
+  // Init particles
+  for (let i = 0; i < 80; i++) {
+    particles.push(spawnParticle());
+  }
+  
+  updateStats();
+  requestAnimationFrame(loop);
+}
+
+function resize() {
+  const container = document.getElementById('canvas-container');
+  W = canvas.width = container.clientWidth * devicePixelRatio;
+  H = canvas.height = container.clientHeight * devicePixelRatio;
+  canvas.style.width = container.clientWidth + 'px';
+  canvas.style.height = container.clientHeight + 'px';
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+}
+
+function worldToScreen(wx, wy) {
+  return {
+    x: (wx * 1000 + offsetX) * scale + W / devicePixelRatio / 2,
+    y: (wy * 800 + offsetY) * scale + H / devicePixelRatio / 2
+  };
+}
+
+function screenToWorld(sx, sy) {
+  return {
+    x: ((sx - W / devicePixelRatio / 2) / scale - offsetX) / 1000,
+    y: ((sy - H / devicePixelRatio / 2) / scale - offsetY) / 800
+  };
+}
+
+// === PARTICLES ===
+function spawnParticle() {
+  const cats = Object.keys(TREASURES);
+  const from = cats[Math.floor(Math.random() * cats.length)];
+  const to = cats[Math.floor(Math.random() * cats.length)];
+  return {
+    from, to,
+    t: Math.random(),
+    speed: 0.002 + Math.random() * 0.004,
+    size: 1.5 + Math.random() * 2,
+    color: TREASURES[from].color
+  };
+}
+
+function updateParticles() {
+  particles.forEach(p => {
+    p.t += p.speed;
+    if (p.t > 1) {
+      Object.assign(p, spawnParticle());
+      p.t = 0;
+    }
+  });
+}
+
+// === RENDERING ===
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  const dpr = devicePixelRatio;
+  
+  // Background grid
+  ctx.strokeStyle = 'rgba(0,255,135,0.05)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 20; i++) {
+    const x = (i * 80 + offsetX * scale) % (W/dpr);
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H/dpr); ctx.stroke();
+    const y = (i * 80 + offsetY * scale) % (H/dpr);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W/dpr, y); ctx.stroke();
+  }
+  
+  // Connections
+  const cats = Object.keys(TREASURES);
+  ctx.strokeStyle = 'rgba(96,239,255,0.25)';
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < cats.length; i++) {
+    for (let j = i + 1; j < cats.length; j++) {
+      if (Math.random() > 0.7) continue; // sparse connections
+      const a = worldToScreen(TREASURES[cats[i]].x, TREASURES[cats[i]].y);
+      const b = worldToScreen(TREASURES[cats[j]].x, TREASURES[cats[j]].y);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+  }
+  
+  // Particles
+  particles.forEach(p => {
+    const a = worldToScreen(TREASURES[p.from].x, TREASURES[p.from].y);
+    const b = worldToScreen(TREASURES[p.to].x, TREASURES[p.to].y);
+    const x = a.x + (b.x - a.x) * p.t;
+    const y = a.y + (b.y - a.y) * p.t;
+    ctx.fillStyle = p.color;
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = p.color;
+    ctx.beginPath();
+    ctx.arc(x, y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  });
+  
+  // Category nodes
+  cats.forEach(name => {
+    const cat = TREASURES[name];
+    const pos = worldToScreen(cat.x, cat.y);
+    const isSelected = selectedCategory === name;
+    const matches = searchTerm && (
+      name.toLowerCase().includes(searchTerm) ||
+      cat.gems.some(g => g.name.toLowerCase().includes(searchTerm) || g.desc.toLowerCase().includes(searchTerm))
+    );
+    
+    // Glow
+    ctx.shadowBlur = isSelected || matches ? 30 : 15;
+    ctx.shadowColor = cat.color;
+    
+    // Node circle
+    ctx.fillStyle = isSelected ? cat.color : 'rgba(10,10,15,0.9)';
+    ctx.strokeStyle = cat.color;
+    ctx.lineWidth = isSelected ? 3 : 2;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, isSelected ? 28 : 22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    
+    // Inner gem count
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px system-ui';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(cat.gems.length, pos.x, pos.y);
+    
+    // Label
+    ctx.fillStyle = matches ? '#ffcc00' : '#e0e0e0';
+    ctx.font = 'bold 12px system-ui';
+    ctx.fillText(name, pos.x, pos.y + 38);
+    
+    ctx.shadowBlur = 0;
+  });
+  
+  document.getElementById('zoom-info').textContent = `Zoom: ${scale.toFixed(1)}x`;
+}
+
+function loop() {
+  updateParticles();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// === INTERACTION ===
+function startDrag(e) {
+  isDragging = true;
+  lastX = e.clientX || e.pageX;
+  lastY = e.clientY || e.pageY;
+}
+function drag(e) {
+  if (!isDragging) return;
+  const x = e.clientX || e.pageX;
+  const y = e.clientY || e.pageY;
+  offsetX += (x - lastX) / scale;
+  offsetY += (y - lastY) / scale;
+  lastX = x;
+  lastY = y;
+}
+function endDrag() { isDragging = false; }
+
+function zoom(e) {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.9 : 1.1;
+  scale = Math.max(0.4, Math.min(2.5, scale * delta));
+}
+
+function onClick(e) {
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+  const world = screenToWorld(sx, sy);
+  
+  Object.keys(TREASURES).forEach(name => {
+    const cat = TREASURES[name];
+    const dx = world.x - cat.x;
+    const dy = world.y - cat.y;
+    if (Math.sqrt(dx*dx + dy*dy) < 0.08) {
+      selectedCategory = name;
+      renderPanel();
+      // Mobile: show panel
+      if (window.innerWidth < 768) {
+        document.getElementById('side-panel').classList.remove('hidden');
+      }
+    }
+  });
+}
+
+function renderPanel() {
+  const content = document.getElementById('panel-content');
+  if (!selectedCategory) {
+    content.innerHTML = '<p class="opacity-60">Click a category node on the map to reveal its hidden gems.</p>';
+    return;
+  }
+  
+  const cat = TREASURES[selectedCategory];
+  let html = `<div class="mb-4">
+    <h3 class="text-base font-bold" style="color:${cat.color}">${selectedCategory}</h3>
+    <p class="text-xs opacity-60">${cat.gems.length} gems</p>
+  </div>`;
+  
+  cat.gems.forEach(gem => {
+    const match = searchTerm && (gem.name.toLowerCase().includes(searchTerm) || gem.desc.toLowerCase().includes(searchTerm));
+    html += `
+      <div class="gem-item p-2 rounded ${match ? 'search-highlight' : ''}">
+        <a href="${gem.url}" target="_blank" class="font-medium hover:text-green-400" style="color:#60efff">${gem.name}</a>
+        <p class="text-xs opacity-70 mt-0.5">${gem.desc}</p>
+      </div>`;
+  });
+  
+  content.innerHTML = html;
+}
+
+function updateStats() {
+  const total = Object.values(TREASURES).reduce((s, c) => s + c.gems.length, 0);
+  document.getElementById('stats').textContent = `Gems: ${total}`;
+}
+
+function exportData() {
+  const data = {
+    meta: { title: "NEXUS Open Source Treasure Map", operator: "DoubleA @ AntManThePro", generated: new Date().toISOString() },
+    treasures: TREASURES
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'nexus-treasure-map.json';
+  a.click();
+}
+
+// Boot
+init();
+</script>
+</body>
+</html>
